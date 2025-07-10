@@ -1,0 +1,82 @@
+spring:
+  profiles:
+    active: local
+
+---
+spring:
+  config:
+    activate:
+      on-profile: local
+  datasource:
+    url: jdbc:postgresql://localhost:5432/batchdb
+    username: postgres
+    password: password
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+  batch:
+    jdbc:
+      initialize-schema: always
+    job:
+      enabled: false # 시작 시 모든 배치가 자동으로 도는 것을 방지
+
+jwt:
+  secret: dGhpcy1pcy1hLXNhbXBsZS1zZWNyZXQta2V5LWZvci1qd3Qtc2hhMjU2LWFsaWduZWQtc2VjdXJpdHktcHJpdmFjeQ== # HS256을 만족하는 최소 32바이트 Base64 키
+  expiration: 86400000 # 24시간
+
+aws:
+  s3:
+    bucket: my-batch-integration-bucket
+    region: ap-northeast-2
+    access-key: aws_access_key_placeholder
+    secret-key: aws_secret_key_placeholder
+
+# Swagger OpenAPI 설정
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+    tags-sorter: alpha
+    operations-sorter: alpha
+  api-docs:
+    path: /v3/api-docs
+
+logging:
+  level:
+    org.springframework.batch: INFO
+    com.company.batchmonitor: DEBUG
+
+---
+spring:
+  config:
+    activate:
+      on-profile: prod
+  datasource:
+    url: jdbc:postgresql://${RDS_HOSTNAME}:${RDS_PORT:5432}/${RDS_DB_NAME:batchdb}
+    username: ${RDS_USERNAME}
+    password: ${RDS_PASSWORD}
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      ddl-auto: none
+    show-sql: false
+  batch:
+    jdbc:
+      initialize-schema: always
+    job:
+      enabled: false
+
+jwt:
+  secret: ${JWT_SECRET_KEY}
+  expiration: 86400000
+
+aws:
+  s3:
+    bucket: ${AWS_S3_BUCKET}
+    region: ${AWS_REGION:ap-northeast-2}
+    access-key: ${AWS_ACCESS_KEY}
+    secret-key: ${AWS_SECRET_KEY}
