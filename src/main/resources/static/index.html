@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BizFlow 업무요청정산증빙 통합 관리 플랫폼</title>
+    <!-- Google Fonts - Outfit & Noto Sans KR -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Custom Style -->
+    <link rel="stylesheet" href="css/dashboard.css">
+</head>
+<body>
+
+    <!-- 1. 로그인 오버레이 / 모달 -->
+    <div id="loginOverlay" class="login-overlay active">
+        <div class="login-box">
+            <div class="login-header">
+                <i class="fa-solid fa-shield-halved security-logo"></i>
+                <h2>BizFlow 통합 관리 플랫폼 로그인</h2>
+                <p>업무요청정산 통합 관제 시스템 접근을 위해 인증을 수행해 주십시오.</p>
+            </div>
+            <form id="loginForm">
+                <div class="input-group">
+                    <label for="username"><i class="fa-solid fa-user-tie"></i> 사원번호 / ID</label>
+                    <input type="text" id="username" placeholder="아이디를 입력하세요" required>
+                </div>
+                <div class="input-group">
+                    <label for="password"><i class="fa-solid fa-lock"></i> 비밀번호</label>
+                    <input type="password" id="password" placeholder="비밀번호를 입력하세요" required>
+                </div>
+                <button type="submit" class="btn btn-login">인증 토큰 발급 <i class="fa-solid fa-key"></i></button>
+            </form>
+            <div class="login-footer">
+                <p>본 시스템은 외부 연계 배치 제어용으로 비인가자 접근 시 법적 처벌을 받습니다.</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- 2. 업무 요청 등록 모달 -->
+    <div id="requestModal" class="login-overlay" style="background: rgba(15, 23, 42, 0.8);">
+        <div class="login-box" style="max-width: 500px;">
+            <div class="panel-header" style="margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center;">
+                <h3><i class="fa-solid fa-file-invoice-dollar"></i> 신규 정산 요청 등록</h3>
+                <button class="btn-clear-console" onclick="toggleRequestModal(false)" style="font-size: 1.2rem;"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <form id="requestForm">
+                <div class="input-group">
+                    <label for="reqTitle">정산 요청 제목</label>
+                    <input type="text" id="reqTitle" placeholder="예: 2026년 6월분 외부기관 연계 정산 수수료 청구" required>
+                </div>
+                <div class="input-group">
+                    <label for="reqAmount">정산 요청 금액 (원)</label>
+                    <input type="number" id="reqAmount" placeholder="예: 1500000" required>
+                </div>
+                <div class="input-group">
+                    <label>증빙 자료 업로드 (S3 저장)</label>
+                    <div class="upload-dropzone" id="modalUploadZone" style="padding: 15px;">
+                        <i class="fa-regular fa-file-lines" style="font-size: 1.5rem; color: var(--text-muted);"></i>
+                        <p style="font-size: 0.7rem; margin-top: 5px;">증빙파일 등록 (클릭/드롭)</p>
+                        <span id="modalFileName" style="font-size: 0.65rem;">선택된 파일 없음</span>
+                    </div>
+                    <input type="file" id="modalFileInput" style="display:none;">
+                    <input type="hidden" id="uploadedAttachmentId">
+                </div>
+                <button type="submit" class="btn btn-primary btn-block" style="margin-top: 15px;">요청서 송신</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- 3. 담당자 배정 모달 -->
+    <div id="assignModal" class="login-overlay" style="background: rgba(15, 23, 42, 0.8);">
+        <div class="login-box" style="max-width: 400px;">
+            <div class="panel-header" style="margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center;">
+                <h3><i class="fa-solid fa-user-check"></i> 담당 운영자 배정</h3>
+                <button class="btn-clear-console" onclick="toggleAssignModal(false)" style="font-size: 1.2rem;"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <form id="assignForm">
+                <input type="hidden" id="assignTargetId">
+                <div class="input-group">
+                    <label for="assigneeUser">운영자 사원번호 (ID)</label>
+                    <select id="assigneeUser" style="width: 100%; background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px 16px; color: var(--text-primary); outline: none;">
+                        <option value="operator">이영희 대리 (operator)</option>
+                        <option value="admin">김철수 주무관 (admin)</option>
+                    </select>
+                </div>
+                <button type="submit" class="btn btn-primary btn-block" style="margin-top: 15px;">배정 완료</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- 4. 메인 대시보드 뷰포트 -->
+    <div id="dashboardApp" class="dashboard-viewport">
+        <!-- 사이드 네비게이션 LNB -->
+        <aside class="sidebar">
+            <div class="sidebar-brand">
+                <i class="fa-solid fa-building-columns brand-icon"></i>
+                <div>
+                    <h1>BizFlow 관제 센터</h1>
+                    <span>Operations Platform</span>
+                </div>
+            </div>
+            
+            <nav class="sidebar-menu">
+                <a href="#" class="menu-item active" id="menuDashboard"><i class="fa-solid fa-gauge-high"></i> 대시보드 홈</a>
+                <a href="/swagger-ui.html" target="_blank" class="menu-item"><i class="fa-solid fa-code"></i> API 명세 (Swagger)</a>
+            </nav>
+
+            <div class="sidebar-user">
+                <div class="user-info">
+                    <span class="user-role" id="displayRole">OPERATOR</span>
+                    <span class="user-name" id="displayName">홍길동 주무관</span>
+                </div>
+                <button class="btn btn-logout" id="btnLogout"><i class="fa-solid fa-right-from-bracket"></i> 로그아웃</button>
+            </div>
+        </aside>
+
+        <!-- 메인 콘텐츠 영역 -->
+        <main class="main-content">
+            <!-- 상단 헤더 -->
+            <header class="content-header">
+                <div class="header-title">
+                    <h2>업무요청 및 정산증빙 관제 센터</h2>
+                    <p>정산 요청 심사, 증빙 관리 및 외부 API 연계 데이터 정합성 자동 검증</p>
+                </div>
+                <div class="header-actions">
+                    <span id="currentTime" class="system-time"><i class="fa-regular fa-clock"></i> 2026-06-30 10:00:00</span>
+                    <button class="btn btn-primary" id="btnRefresh"><i class="fa-solid fa-rotate"></i> 새로고침</button>
+                </div>
+            </header>
+
+            <!-- 통계 요약 카드 (Metrics Cards) -->
+            <section class="metrics-grid">
+                <div class="metric-card">
+                    <div class="metric-info">
+                        <h3>정산 요청 건수</h3>
+                        <p class="metric-value" id="settlementTotal">0</p>
+                    </div>
+                    <div class="metric-icon total"><i class="fa-solid fa-list-check"></i></div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-info">
+                        <h3>최종 승인 완료</h3>
+                        <p class="metric-value text-success" id="settlementApproved">0</p>
+                    </div>
+                    <div class="metric-icon success"><i class="fa-solid fa-circle-check"></i></div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-info">
+                        <h3>정합성 불일치</h3>
+                        <p class="metric-value text-danger" id="reconcileMismatch">0</p>
+                    </div>
+                    <div class="metric-icon failed"><i class="fa-solid fa-triangle-exclamation"></i></div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-info">
+                        <h3>배치 에러 상태</h3>
+                        <p class="metric-value text-warning" id="batchFailedCount">0</p>
+                    </div>
+                    <div class="metric-icon running"><i class="fa-solid fa-spinner"></i></div>
+                </div>
+            </section>
+
+            <!-- 정산 요청 업무 관리 보드 -->
+            <section class="dashboard-body" style="grid-template-columns: 1fr;">
+                <div class="table-container">
+                    <div class="panel-header" style="display:flex; justify-content:space-between; align-items:center;">
+                        <h3><i class="fa-solid fa-file-invoice"></i> 업무 요청 및 정산 심사 프로세스</h3>
+                        <button class="btn btn-primary btn-mini" onclick="toggleRequestModal(true)">
+                            <i class="fa-solid fa-plus"></i> 정산 요청 등록
+                        </button>
+                    </div>
+                    <div class="table-wrapper">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>ID</th>
+                                    <th>정산 요청 제목</th>
+                                    <th>요청 금액</th>
+                                    <th>요청자</th>
+                                    <th>담당자</th>
+                                    <th>정산 상태</th>
+                                    <th>증빙 서류</th>
+                                    <th>연계 정합성</th>
+                                    <th>외부 정산액</th>
+                                    <th>조작</th>
+                                </tr>
+                            </thead>
+                            <tbody id="settlementTableBody">
+                                <tr>
+                                    <td colspan="10" class="text-center">로딩 중...</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 제어 및 목록 섹션 (배치 제어 및 이력) -->
+            <section class="dashboard-body">
+                <!-- 배치 제어 보드 -->
+                <div class="control-panel">
+                    <div class="panel-header">
+                        <h3><i class="fa-solid fa-sliders"></i> 외부 API 연계 배치 제어</h3>
+                    </div>
+                    <div class="panel-content">
+                        <!-- 기존 배치 -->
+                        <button class="btn btn-control" id="btnTriggerMockSuccess">
+                            <i class="fa-solid fa-play"></i> 파일연계 배치 실행 (정상)
+                        </button>
+                        
+                        <!-- 신규 연합성 검증 배치 -->
+                        <button class="btn btn-control" id="btnTriggerReconSuccess" style="border-left: 4px solid var(--success);">
+                            <i class="fa-solid fa-check-double"></i> 정산 정합성 검사 (정상)
+                        </button>
+                        <button class="btn btn-control btn-danger-outline" id="btnTriggerReconFailed" style="border-left: 4px solid var(--danger);">
+                            <i class="fa-solid fa-bug"></i> 정산 정합성 검사 (오류유도)
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 실시간 모니터링 보드 -->
+                <div class="table-container">
+                    <div class="panel-header">
+                        <h3><i class="fa-solid fa-table-list"></i> 배치 스케줄러 실행 내역</h3>
+                    </div>
+                    <div class="table-wrapper">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>ID</th>
+                                    <th>배치 작업명</th>
+                                    <th>시작 시각</th>
+                                    <th>소요 시간</th>
+                                    <th>상태</th>
+                                    <th>재처리 횟수</th>
+                                    <th>재처리 이력</th>
+                                    <th>조작</th>
+                                </tr>
+                            </thead>
+                            <tbody id="historyTableBody">
+                                <tr>
+                                    <td colspan="8" class="text-center">데이터 로딩 중...</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 터미널 콘솔 로그 -->
+            <section class="console-section">
+                <div class="console-header">
+                    <h3><i class="fa-solid fa-terminal"></i> 통합 배치 관제 로그 시스템</h3>
+                    <button class="btn btn-clear-console" id="btnClearConsole"><i class="fa-solid fa-trash-can"></i> 지우기</button>
+                </div>
+                <div class="console-body" id="consoleScreen">
+                    <div class="console-line system">[SYSTEM] 시스템이 정상 부팅되었습니다.</div>
+                    <div class="console-line system">[SYSTEM] 외부 연계 스케줄러(Cron)가 활성화되었습니다.</div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- UI/UX Logic Script -->
+    <script src="js/dashboard.js"></script>
+</body>
+</html>
+
