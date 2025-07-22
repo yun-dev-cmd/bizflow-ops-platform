@@ -113,7 +113,7 @@ public class SettlementVerificationBatchConfig {
                 
                 if (historyId == null) {
                     BatchJobHistory history = BatchJobHistory.builder()
-                            .jobName(jobExecution.getJob().getName())
+                            .jobName(jobExecution.getJobInstance().getJobName())
                             .startTime(LocalDateTime.now())
                             .status("RUNNING")
                             .retryCount(0)

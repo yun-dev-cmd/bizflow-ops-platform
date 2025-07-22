@@ -90,7 +90,7 @@ public class FileIntegrationBatchJobConfig {
                 // REST API 수동 기동 시 이미 생성된 이력을 가져오고, Scheduler 자동 기동일 경우 이 시점에 신규 이력을 생성
                 if (historyId == null) {
                     BatchJobHistory history = BatchJobHistory.builder()
-                            .jobName(jobExecution.getJob().getName())
+                            .jobName(jobExecution.getJobInstance().getJobName())
                             .startTime(LocalDateTime.now())
                             .status("RUNNING")
                             .retryCount(0)
