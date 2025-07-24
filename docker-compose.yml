@@ -3,7 +3,7 @@ version: '3.8'
 services:
   postgres:
     image: postgres:15-alpine
-    container_name: batch-postgres
+    container_name: bizflow-postgres
     environment:
       POSTGRES_DB: batchdb
       POSTGRES_USER: postgres
@@ -16,8 +16,8 @@ services:
     restart: always
 
   app:
-    build: .
-    container_name: batch-monitor-app
+    build: ./backend
+    container_name: bizflow-ops-app
     ports:
       - "8080:8080"
     environment:
@@ -27,9 +27,9 @@ services:
       RDS_USERNAME: postgres
       RDS_PASSWORD: password
       JWT_SECRET_KEY: dGhpcy1pcy1hLXNhbXBsZS1zZWNyZXQta2V5LWZvci1qd3Qtc2hhMjU2LWFsaWduZWQtc2VjdXJpdHktcHJpdmFjeQ==
-      AWS_S3_BUCKET: my-batch-integration-bucket
-      AWS_ACCESS_KEY: mock
-      AWS_SECRET_KEY: mock
+      AWS_S3_BUCKET: bizflow-integration-bucket
+      AWS_ACCESS_KEY: temp
+      AWS_SECRET_KEY: temp
     depends_on:
       - postgres
     restart: always
