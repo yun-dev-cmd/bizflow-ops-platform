@@ -16,21 +16,21 @@ public class Attachment {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    @Column(name = "settlement_request_id")
+    private Long settlementRequestId;
+
     @Column(nullable = false)
     private String originalFileName;
 
     @Column(nullable = false)
-    private String storedFileName; // S3 Key 또는 로컬 저장된 유니크 파일명
+    private String storedPath; // S3 Key 또는 로컬 저장된 유니크 파일명/경로
 
     @Column(nullable = false)
-    private String fileUrl;
-
-    @Column(nullable = false)
-    private Long fileSize;
+    private String storageType; // LOCAL, S3_MOCK
 
     @Column(nullable = false)
     private String uploadedBy;
 
     @Column(nullable = false)
-    private LocalDateTime uploadedAt;
+    private LocalDateTime createdAt;
 }

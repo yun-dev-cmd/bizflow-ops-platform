@@ -27,8 +27,8 @@ public class SettlementRequest {
     private User requester; // 요청 등록자
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "assignee_id")
-    private User assignee; // 담당 배정자
+    @JoinColumn(name = "assigned_operator_id")
+    private User assignedOperator; // 담당 배정자
 
     @Column(nullable = false)
     private String status; // REQUESTED, ASSIGNED, APPROVED, REJECTED
@@ -41,7 +41,7 @@ public class SettlementRequest {
     private String externalSyncStatus; // PENDING, SUCCESS, ERROR (외부 연계 상태)
 
     @Column(nullable = false)
-    private String reconciliationStatus; // UNVERIFIED, MATCHED, MISMATCHED (정합성 검증 상태)
+    private String reconciliationStatus; // UNVERIFIED, MATCHED, MISMATCHED, MISSING_EXTERNAL, UNKNOWN_EXTERNAL, INVALID_STATUS
 
     private Long externalAmount; // 외부 기관에서 회신된 실거래 정산 금액
 
@@ -49,7 +49,7 @@ public class SettlementRequest {
     private LocalDateTime updatedAt;
 
     public void assignOperator(User operator) {
-        this.assignee = operator;
+        this.assignedOperator = operator;
         this.status = "ASSIGNED";
         this.updatedAt = LocalDateTime.now();
     }
@@ -68,6 +68,11 @@ public class SettlementRequest {
         this.externalSyncStatus = syncStatus;
         this.reconciliationStatus = reconStatus;
         this.externalAmount = extAmount;
+        this.updatedAt = LocalDateTime.now();
+    }
+
+    public void setAttachment(Attachment attachment) {
+        this.attachment = attachment;
         this.updatedAt = LocalDateTime.now();
     }
 }
