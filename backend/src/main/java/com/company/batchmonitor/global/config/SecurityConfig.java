@@ -3,7 +3,6 @@ package com.company.batchmonitor.global.config;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
@@ -39,12 +38,20 @@ public class SecurityConfig {
                 .requestMatchers("/", "/index.html", "/static/**", "/css/**", "/js/**", "/favicon.ico").permitAll()
                 // Swagger UI & API docs
                 .requestMatchers("/swagger-ui/**", "/v3/api-docs/**", "/swagger-resources/**", "/webjars/**").permitAll()
-                // 배치 조회는 누구나 허용 (ROLE_USER, ROLE_OPERATOR, ROLE_ADMIN)
-                .requestMatchers(HttpMethod.GET, "/api/batch/**").hasAnyRole("USER", "OPERATOR", "ADMIN")
-                // 배치 제어/재처리는 ADMIN, OPERATOR만 허용
-                .requestMatchers(HttpMethod.POST, "/api/batch/**").hasAnyRole("OPERATOR", "ADMIN")
-                // 파일 업로드/다운로드는 ADMIN, OPERATOR만 허용
-                .requestMatchers("/api/files/**").hasAnyRole("OPERATOR", "ADMIN")
+                // 외부 연계 Mock API
+                .requestMatchers("/api/external-results/mock").permitAll()
+                .requestMatchers("/api/external-results").hasAnyRole("OPERATOR", "ADMIN")
+                // 대시보드 요약 정보
+                .requestMatchers("/api/dashboard/summary").hasAnyRole("USER", "OPERATOR", "ADMIN")
+                // 정산 요청 및 첨부파일 API
+                .requestMatchers("/api/settlements/**").hasAnyRole("USER", "OPERATOR", "ADMIN")
+                .requestMatchers("/api/files/**").hasAnyRole("USER", "OPERATOR", "ADMIN")
+                // 배치 실행 및 결과
+                .requestMatchers("/api/batches/reconciliation/run").hasAnyRole("OPERATOR", "ADMIN")
+                .requestMatchers("/api/batches/reconciliation/retry").hasRole("ADMIN")
+                .requestMatchers("/api/batches/logs").hasAnyRole("OPERATOR", "ADMIN")
+                .requestMatchers("/api/reconciliation-results").hasAnyRole("OPERATOR", "ADMIN")
+                // 그 외 모든 요청은 인증 필요
                 .anyRequest().authenticated()
             )
             .addFilterBefore(new JwtAuthenticationFilter(jwtTokenProvider), UsernamePasswordAuthenticationFilter.class);

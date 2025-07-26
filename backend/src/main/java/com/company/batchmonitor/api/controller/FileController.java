@@ -24,12 +24,11 @@ public class FileController {
 
     private final FileService fileService;
 
-    @Operation(summary = "연계 파일 업로드", description = "연계할 파일을 업로드하여 S3 또는 로컬 저장소에 저장하고 파일 ID를 반환합니다. (OPERATOR, ADMIN 권한 필요)")
     @PostMapping(value = "/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<Attachment> uploadFile(
             @RequestPart("file") MultipartFile file,
             @AuthenticationPrincipal UserDetails userDetails) throws IOException {
-        Attachment attachment = fileService.uploadFile(file, userDetails.getUsername());
+        Attachment attachment = fileService.uploadFile(file, userDetails.getUsername(), null);
         return ResponseEntity.ok(attachment);
     }
 

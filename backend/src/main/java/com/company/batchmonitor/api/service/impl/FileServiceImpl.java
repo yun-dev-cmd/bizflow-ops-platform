@@ -35,19 +35,20 @@ public class FileServiceImpl implements FileService {
     @Value("${aws.s3.bucket}")
     private String bucketName;
 
-    // 로컬 백업용 디렉토리 (S3 에러 발생 시 Fallback 저장소)
-    private final String localUploadDir = "E:/Aws/uploads";
+    // 로컬 백업용 디렉토리 (S3 에러 발생 시 Fallback 저장소) - 상대경로로 변경하여 이식성 증대
+    private final String localUploadDir = "./uploads";
 
     @Override
     @Transactional
-    public Attachment uploadFile(MultipartFile file, String username) throws IOException {
+    public Attachment uploadFile(MultipartFile file, String username, Long settlementRequestId) throws IOException {
         String originalFileName = file.getOriginalFilename();
         String storedFileName = UUID.randomUUID().toString() + "_" + originalFileName;
         long fileSize = file.getSize();
-        String fileUrl;
+        String storedPath;
+        String storageType = "S3_MOCK";
 
         try {
-            // 1. AWS S3 업로드 시도
+            // 1. AWS S3 업로드 시도 (Mock S3 환경이거나 환경변수 비정상 시 exception 발생)
             PutObjectRequest putObjectRequest = PutObjectRequest.builder()
                     .bucket(bucketName)
                     .key(storedFileName)
@@ -55,7 +56,7 @@ public class FileServiceImpl implements FileService {
                     .build();
 
             s3Client.putObject(putObjectRequest, RequestBody.fromInputStream(file.getInputStream(), fileSize));
-            fileUrl = String.format("https://%s.s3.ap-northeast-2.amazonaws.com/%s", bucketName, storedFileName);
+            storedPath = String.format("https://%s.s3.ap-northeast-2.amazonaws.com/%s", bucketName, storedFileName);
             log.info("Successfully uploaded file to AWS S3: key={}", storedFileName);
 
         } catch (Exception e) {
@@ -69,18 +70,19 @@ public class FileServiceImpl implements FileService {
             Path targetPath = Paths.get(localUploadDir).resolve(storedFileName);
             Files.copy(file.getInputStream(), targetPath);
             
-            fileUrl = targetPath.toAbsolutePath().toString();
-            log.info("Successfully saved file to Local: path={}", fileUrl);
+            storedPath = targetPath.toAbsolutePath().toString();
+            storageType = "LOCAL";
+            log.info("Successfully saved file to Local: path={}", storedPath);
         }
 
         // 3. DB 메타데이터 저장
         Attachment attachment = Attachment.builder()
+                .settlementRequestId(settlementRequestId)
                 .originalFileName(originalFileName)
-                .storedFileName(storedFileName)
-                .fileSize(fileSize)
-                .fileUrl(fileUrl)
+                .storedPath(storedPath)
+                .storageType(storageType)
                 .uploadedBy(username)
-                .uploadedAt(LocalDateTime.now())
+                .createdAt(LocalDateTime.now())
                 .build();
 
         return attachmentRepository.save(attachment);
@@ -90,31 +92,53 @@ public class FileServiceImpl implements FileService {
     @Transactional(readOnly = true)
     public byte[] downloadFile(Long fileId) throws IOException {
         Attachment attachment = getFileMetadata(fileId);
-        String storedFileName = attachment.getStoredFileName();
+        String storedPath = attachment.getStoredPath();
+        String storageType = attachment.getStorageType();
 
-        try {
-            // 1. AWS S3에서 파일 조회 시도
-            GetObjectRequest getObjectRequest = GetObjectRequest.builder()
-                    .bucket(bucketName)
-                    .key(storedFileName)
-                    .build();
-
-            ResponseBytes<GetObjectResponse> objectBytes = s3Client.getObjectAsBytes(getObjectRequest);
-            log.info("Successfully downloaded file from AWS S3: key={}", storedFileName);
-            return objectBytes.asByteArray();
-
-        } catch (Exception e) {
-            log.warn("AWS S3 download failed. Trying local storage fallback. Reason: {}", e.getMessage());
-
-            // 2. Fallback: 로컬 저장소에서 파일 읽기
-            Path localPath = Paths.get(localUploadDir).resolve(storedFileName);
-            if (Files.exists(localPath)) {
-                log.info("Successfully retrieved file from Local: path={}", localPath);
-                return Files.readAllBytes(localPath);
+        if ("LOCAL".equals(storageType)) {
+            // 로컬 저장소에서 파일 읽기
+            Path path = Paths.get(storedPath);
+            if (Files.exists(path)) {
+                log.info("Successfully retrieved file from Local: path={}", path);
+                return Files.readAllBytes(path);
             }
-            
-            throw new IOException("파일을 찾을 수 없습니다. (S3 및 로컬 저장소 모두 조회 실패)", e);
+            // 만약 상대경로 결합이 필요한 경우 처리
+            String fileName = path.getFileName().toString();
+            Path fallbackPath = Paths.get(localUploadDir).resolve(fileName);
+            if (Files.exists(fallbackPath)) {
+                log.info("Successfully retrieved file from Local Fallback: path={}", fallbackPath);
+                return Files.readAllBytes(fallbackPath);
+            }
+        } else {
+            try {
+                // AWS S3에서 파일 조회 시도
+                String storedFileName = storedPath.substring(storedPath.lastIndexOf("/") + 1);
+                GetObjectRequest getObjectRequest = GetObjectRequest.builder()
+                        .bucket(bucketName)
+                        .key(storedFileName)
+                        .build();
+
+                ResponseBytes<GetObjectResponse> objectBytes = s3Client.getObjectAsBytes(getObjectRequest);
+                log.info("Successfully downloaded file from AWS S3: key={}", storedFileName);
+                return objectBytes.asByteArray();
+
+            } catch (Exception e) {
+                log.warn("AWS S3 download failed. Trying local storage fallback. Reason: {}", e.getMessage());
+            }
         }
+
+        // 최후의 수단: 파일 이름으로 로컬 디렉토리 검색
+        String fileNameOnly = storedPath.substring(storedPath.lastIndexOf(File.separator) + 1);
+        if (fileNameOnly.contains("/")) {
+            fileNameOnly = fileNameOnly.substring(fileNameOnly.lastIndexOf("/") + 1);
+        }
+        Path localPath = Paths.get(localUploadDir).resolve(fileNameOnly);
+        if (Files.exists(localPath)) {
+            log.info("Fallback: Successfully retrieved file from Local relative path: path={}", localPath);
+            return Files.readAllBytes(localPath);
+        }
+
+        throw new IOException("파일을 찾을 수 없습니다. (S3 및 로컬 저장소 모두 조회 실패)");
     }
 
     @Override
