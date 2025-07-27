@@ -1,8 +1,12 @@
 package com.company.batchmonitor.batch.jobs;
 
-import com.company.batchmonitor.domain.BatchJobHistory;
+import com.company.batchmonitor.domain.BatchJobLog;
+import com.company.batchmonitor.domain.ExternalResult;
+import com.company.batchmonitor.domain.ReconciliationResult;
 import com.company.batchmonitor.domain.SettlementRequest;
-import com.company.batchmonitor.repository.BatchJobHistoryRepository;
+import com.company.batchmonitor.repository.BatchJobLogRepository;
+import com.company.batchmonitor.repository.ExternalResultRepository;
+import com.company.batchmonitor.repository.ReconciliationResultRepository;
 import com.company.batchmonitor.repository.SettlementRequestRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -20,7 +24,10 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.transaction.PlatformTransactionManager;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 @Slf4j
 @Configuration
@@ -30,7 +37,9 @@ public class SettlementVerificationBatchConfig {
     private final JobRepository jobRepository;
     private final PlatformTransactionManager transactionManager;
     private final SettlementRequestRepository settlementRequestRepository;
-    private final BatchJobHistoryRepository batchJobHistoryRepository;
+    private final ExternalResultRepository externalResultRepository;
+    private final ReconciliationResultRepository reconciliationResultRepository;
+    private final BatchJobLogRepository batchJobLogRepository;
 
     @Bean
     public Job settlementVerificationJob() {
@@ -52,53 +61,111 @@ public class SettlementVerificationBatchConfig {
         return (contribution, chunkContext) -> {
             log.info(">>>>> [Reconciliation Step] 정산 데이터 정합성 검증 배치 가동");
 
-            // 1. 검증 대상(APPROVED 상태의 정산 요청) 조회
-            List<SettlementRequest> targets = settlementRequestRepository.findByStatus("APPROVED");
-            if (targets.isEmpty()) {
-                log.info(">>>>> 검증 대상 정산 요청 건이 존재하지 않습니다.");
-                return RepeatStatus.FINISHED;
-            }
+            // 1. 데이터 전체 수집
+            List<SettlementRequest> requests = settlementRequestRepository.findAll();
+            List<ExternalResult> externalResults = externalResultRepository.findAll();
 
-            log.info(">>>>> 총 {}건의 정산 요청에 대한 검증을 시작합니다.", targets.size());
+            log.info(">>>>> 내부 정산 요청 건수: {}건, 외부 연계 실적 건수: {}건", requests.size(), externalResults.size());
 
-            // 모의 에러 발생 옵션 체크
-            Object isMockFailure = chunkContext.getStepContext().getJobParameters().get("mockFailure");
-            boolean triggerFailure = isMockFailure != null && "true".equals(isMockFailure.toString());
+            // 2. 외부 실적을 정산 요청 ID 기준으로 Map 캐싱 (ID 중복 시 첫 번째 값 채택)
+            Map<Long, ExternalResult> externalMap = externalResults.stream()
+                    .filter(e -> e.getSettlementRequestId() != null)
+                    .collect(Collectors.toMap(ExternalResult::getSettlementRequestId, e -> e, (e1, e2) -> e1));
 
-            int mismatchCount = 0;
-            int errorCount = 0;
+            int successCount = 0;
+            int failCount = 0;
+            List<ReconciliationResult> reconResults = new ArrayList<>();
 
-            for (SettlementRequest request : targets) {
-                // 2. 연계 기관 실거래 정산 내역 API 호출 및 수신 (테스트 파라미터가 켜진 경우 일부 불일치 데이터 반환)
-                long mockExternalAmount;
-                
-                if (triggerFailure && request.getId() % 2 == 1) {
-                    // 금액 대조 불일치 테스트 케이스 시뮬레이션
-                    mockExternalAmount = request.getAmount() - 50000; 
+            // 3. 정합성 대조 검증 수행
+
+            // A. 내부 정산 요청 기준 검증 (규칙 1, 2, 3, 5)
+            for (SettlementRequest req : requests) {
+                ExternalResult ext = externalMap.get(req.getId());
+                String reconStatus;
+                String reason;
+
+                if (ext != null) {
+                    if ("APPROVED".equals(req.getStatus())) {
+                        if (req.getAmount().equals(ext.getExternalAmount())) {
+                            reconStatus = "MATCHED";
+                            reason = "내부 승인 정산 요청과 외부 실적 데이터의 금액이 일치합니다.";
+                            successCount++;
+                        } else {
+                            reconStatus = "MISMATCHED";
+                            reason = "내부 승인 금액(" + req.getAmount() + ")과 외부 금액(" + ext.getExternalAmount() + ")이 불일치합니다.";
+                            failCount++;
+                        }
+                    } else {
+                        reconStatus = "INVALID_STATUS";
+                        reason = "내부 요청 상태가 APPROVED가 아님(" + req.getStatus() + ")에도 외부 실적이 존재합니다.";
+                        failCount++;
+                    }
                 } else {
-                    mockExternalAmount = request.getAmount(); 
+                    if ("APPROVED".equals(req.getStatus())) {
+                        reconStatus = "MISSING_EXTERNAL";
+                        reason = "내부 정산 요청이 APPROVED 상태이나 외부 실적 데이터가 존재하지 않습니다.";
+                        failCount++;
+                    } else {
+                        reconStatus = "UNVERIFIED";
+                        reason = "미승인 건 및 외부 데이터 없음 (검증 보류)";
+                    }
                 }
 
-                // 3. 정합성 대조 검증 수행
-                if (mockExternalAmount == request.getAmount()) {
-                    request.updateReconciliation("SUCCESS", "MATCHED", mockExternalAmount);
-                    log.info(">> [MATCHED] ID: {} - 내부 정산액과 외부 정산액 일치 ({}원)", request.getId(), request.getAmount());
-                } else {
-                    request.updateReconciliation("SUCCESS", "MISMATCHED", mockExternalAmount);
-                    log.error(">> [MISMATCHED] ID: {} - 내부 정산액({}) != 외부 정산액({})", 
-                            request.getId(), request.getAmount(), mockExternalAmount);
-                    mismatchCount++;
+                req.updateReconciliation("SUCCESS", reconStatus, ext != null ? ext.getExternalAmount() : null);
+                settlementRequestRepository.save(req);
+
+                // 검증 보류 건(UNVERIFIED)을 제외하고 결과 내역에 기록
+                if (!"UNVERIFIED".equals(reconStatus)) {
+                    ReconciliationResult reconRes = ReconciliationResult.builder()
+                            .settlementRequestId(req.getId())
+                            .resultType(reconStatus)
+                            .internalAmount(req.getAmount())
+                            .externalAmount(ext != null ? ext.getExternalAmount() : null)
+                            .reason(reason)
+                            .createdAt(LocalDateTime.now())
+                            .build();
+                    reconResults.add(reconRes);
+                }
+            }
+
+            // B. 외부 실적 기준 검증 (규칙 4 - UNKNOWN_EXTERNAL)
+            for (ExternalResult ext : externalResults) {
+                boolean hasInternal = false;
+                if (ext.getSettlementRequestId() != null) {
+                    hasInternal = settlementRequestRepository.existsById(ext.getSettlementRequestId());
                 }
 
-                settlementRequestRepository.save(request);
+                if (!hasInternal) {
+                    String reconStatus = "UNKNOWN_EXTERNAL";
+                    String reason = "내부 정산 요청 기록이 없으나 외부 연계 실적만 존재합니다. (외부 거래 ID: " + ext.getExternalTransactionId() + ")";
+                    failCount++;
+
+                    ReconciliationResult reconRes = ReconciliationResult.builder()
+                            .settlementRequestId(ext.getSettlementRequestId())
+                            .resultType(reconStatus)
+                            .internalAmount(null)
+                            .externalAmount(ext.getExternalAmount())
+                            .reason(reason)
+                            .createdAt(LocalDateTime.now())
+                            .build();
+                    reconResults.add(reconRes);
+                }
             }
 
-            // 4. 검증 결과에 따른 배치 결과 판정 (실패 재처리 매커니즘 연계)
-            if (mismatchCount > 0) {
-                throw new RuntimeException("정산 정합성 검증 실패 건이 " + mismatchCount + "건 존재하여 배치를 중단합니다. (RECONCILIATION_ERROR)");
+            // 결과 일괄 저장
+            reconciliationResultRepository.saveAll(reconResults);
+
+            log.info(">>>>> 검증 배치 처리 완료 (성공: {}건, 정합성 위배: {}건)", successCount, failCount);
+
+            // JobExecutionContext에 카운트 전달하여 리스너에서 DB 로그 생성에 활용 가능하도록 처리
+            chunkContext.getStepContext().getStepExecution().getJobExecution().getExecutionContext().put("successCount", successCount);
+            chunkContext.getStepContext().getStepExecution().getJobExecution().getExecutionContext().put("failCount", failCount);
+
+            // 정합성 오류가 발생한 경우 배치를 실패 판정하여 재처리 대상이 되도록 예외 처리
+            if (failCount > 0) {
+                throw new RuntimeException("정합성 검증 불일치/누락 건이 " + failCount + "건 발생하여 배치를 실패 처리합니다. (RECONCILIATION_ERROR)");
             }
 
-            log.info(">>>>> 모든 정산 데이터 정합성 검증 통과 (SUCCESS)");
             return RepeatStatus.FINISHED;
         };
     }
@@ -109,45 +176,52 @@ public class SettlementVerificationBatchConfig {
             @Override
             public void beforeJob(JobExecution jobExecution) {
                 log.info("====== settlementVerificationJob 가동 전 리스너 작동 ======");
-                Long historyId = (Long) jobExecution.getJobParameters().getLong("historyId");
+                Long logId = jobExecution.getJobParameters().getLong("logId");
                 
-                if (historyId == null) {
-                    BatchJobHistory history = BatchJobHistory.builder()
+                if (logId == null) {
+                    BatchJobLog jobLog = BatchJobLog.builder()
                             .jobName(jobExecution.getJobInstance().getJobName())
-                            .startTime(LocalDateTime.now())
+                            .startedAt(LocalDateTime.now())
                             .status("RUNNING")
+                            .successCount(0)
+                            .failCount(0)
                             .retryCount(0)
                             .isRetried(false)
                             .build();
-                    batchJobHistoryRepository.save(history);
-                    jobExecution.getExecutionContext().put("historyId", history.getId());
+                    batchJobLogRepository.save(jobLog);
+                    jobExecution.getExecutionContext().put("logId", jobLog.getId());
                 } else {
-                    jobExecution.getExecutionContext().put("historyId", historyId);
+                    jobExecution.getExecutionContext().put("logId", logId);
                 }
             }
 
             @Override
             public void afterJob(JobExecution jobExecution) {
                 log.info("====== settlementVerificationJob 가동 완료 리스너 작동 ======");
-                Long historyId = jobExecution.getExecutionContext().getLong("historyId");
+                Long logId = jobExecution.getExecutionContext().getLong("logId");
                 
-                BatchJobHistory history = batchJobHistoryRepository.findById(historyId).orElse(null);
-                if (history != null) {
+                BatchJobLog jobLog = batchJobLogRepository.findById(logId).orElse(null);
+                if (jobLog != null) {
                     String status = jobExecution.getStatus().toString();
-                    String exitMsg = jobExecution.getExitStatus().getExitDescription();
+                    String errorMsg = jobExecution.getExitStatus().getExitDescription();
                     
+                    int successCount = jobExecution.getExecutionContext().containsKey("successCount") ? 
+                            jobExecution.getExecutionContext().getInt("successCount") : 0;
+                    int failCount = jobExecution.getExecutionContext().containsKey("failCount") ? 
+                            jobExecution.getExecutionContext().getInt("failCount") : 0;
+
                     if (jobExecution.getStatus().isUnsuccessful()) {
                         status = "FAILED";
                         if (!jobExecution.getAllFailureExceptions().isEmpty()) {
-                            exitMsg = jobExecution.getAllFailureExceptions().get(0).getMessage();
+                            errorMsg = jobExecution.getAllFailureExceptions().get(0).getMessage();
                         }
                     } else {
                         status = "SUCCESS";
-                        exitMsg = "정산 검증 배치가 정상 완료되었습니다.";
+                        errorMsg = "정산 검증 배치가 정상 완료되었습니다.";
                     }
                     
-                    history.complete(status, exitMsg);
-                    batchJobHistoryRepository.save(history);
+                    jobLog.complete(status, successCount, failCount, errorMsg);
+                    batchJobLogRepository.save(jobLog);
                 }
             }
         };

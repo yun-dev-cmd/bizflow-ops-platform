@@ -1,7 +1,7 @@
 package com.company.batchmonitor.batch.jobs;
 
-import com.company.batchmonitor.domain.BatchJobHistory;
-import com.company.batchmonitor.repository.BatchJobHistoryRepository;
+import com.company.batchmonitor.domain.BatchJobLog;
+import com.company.batchmonitor.repository.BatchJobLogRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.batch.core.Job;
@@ -26,7 +26,7 @@ public class FileIntegrationBatchJobConfig {
 
     private final JobRepository jobRepository;
     private final PlatformTransactionManager transactionManager;
-    private final BatchJobHistoryRepository batchJobHistoryRepository;
+    private final BatchJobLogRepository batchJobLogRepository;
 
     @Bean
     public Job fileIntegrationJob() {
@@ -55,9 +55,6 @@ public class FileIntegrationBatchJobConfig {
     public Tasklet fileDownloadTasklet() {
         return (contribution, chunkContext) -> {
             log.info(">>>>> [Step 1] 외부 연계 파일 다운로드 및 S3 백업 작업 시작");
-            // SFTP 서버에서 수신 대상 파일을 로컬 Temp 디렉토리로 가져오는 연계 영역
-            
-            log.info(">>>>> [Step 1] 연계 파일 수신 완료.");
             return RepeatStatus.FINISHED;
         };
     }
@@ -67,7 +64,6 @@ public class FileIntegrationBatchJobConfig {
         return (contribution, chunkContext) -> {
             log.info(">>>>> [Step 2] 연계 데이터 파싱 및 파이프라인 처리 시작");
             
-            // 테스트 시뮬레이션용 실패 파라미터 확인
             Object isMockFailure = chunkContext.getStepContext().getJobParameters().get("mockFailure");
             if (isMockFailure != null && "true".equals(isMockFailure.toString())) {
                 log.error(">>>>> [Step 2] 금융 연계 전문 데이터 정합성 검증 실패 (HASH_MISMATCH)");
@@ -85,47 +81,47 @@ public class FileIntegrationBatchJobConfig {
             @Override
             public void beforeJob(JobExecution jobExecution) {
                 log.info("====== fileIntegrationJob 배치 가동 전 리스너 작동 ======");
-                Long historyId = (Long) jobExecution.getJobParameters().getLong("historyId");
+                Long logId = jobExecution.getJobParameters().getLong("logId");
                 
-                // REST API 수동 기동 시 이미 생성된 이력을 가져오고, Scheduler 자동 기동일 경우 이 시점에 신규 이력을 생성
-                if (historyId == null) {
-                    BatchJobHistory history = BatchJobHistory.builder()
+                if (logId == null) {
+                    BatchJobLog jobLog = BatchJobLog.builder()
                             .jobName(jobExecution.getJobInstance().getJobName())
-                            .startTime(LocalDateTime.now())
+                            .startedAt(LocalDateTime.now())
                             .status("RUNNING")
+                            .successCount(0)
+                            .failCount(0)
                             .retryCount(0)
                             .isRetried(false)
                             .build();
-                    batchJobHistoryRepository.save(history);
-                    jobExecution.getExecutionContext().put("historyId", history.getId());
+                    batchJobLogRepository.save(jobLog);
+                    jobExecution.getExecutionContext().put("logId", jobLog.getId());
                 } else {
-                    jobExecution.getExecutionContext().put("historyId", historyId);
+                    jobExecution.getExecutionContext().put("logId", logId);
                 }
             }
 
             @Override
             public void afterJob(JobExecution jobExecution) {
                 log.info("====== fileIntegrationJob 배치 가동 완료 리스너 작동 ======");
-                Long historyId = jobExecution.getExecutionContext().getLong("historyId");
+                Long logId = jobExecution.getExecutionContext().getLong("logId");
                 
-                BatchJobHistory history = batchJobHistoryRepository.findById(historyId).orElse(null);
-                if (history != null) {
+                BatchJobLog jobLog = batchJobLogRepository.findById(logId).orElse(null);
+                if (jobLog != null) {
                     String status = jobExecution.getStatus().toString();
-                    String exitMsg = jobExecution.getExitStatus().getExitDescription();
+                    String errorMsg = jobExecution.getExitStatus().getExitDescription();
                     
                     if (jobExecution.getStatus().isUnsuccessful()) {
                         status = "FAILED";
-                        // 예외 스택트레이스 파싱하여 저장
-                        if (jobExecution.getAllFailureExceptions().size() > 0) {
-                            exitMsg = jobExecution.getAllFailureExceptions().get(0).getMessage();
+                        if (!jobExecution.getAllFailureExceptions().isEmpty()) {
+                            errorMsg = jobExecution.getAllFailureExceptions().get(0).getMessage();
                         }
                     } else {
                         status = "SUCCESS";
-                        exitMsg = "배치가 성공적으로 완료되었습니다.";
+                        errorMsg = "배치가 성공적으로 완료되었습니다.";
                     }
                     
-                    history.complete(status, exitMsg);
-                    batchJobHistoryRepository.save(history);
+                    jobLog.complete(status, 120, 0, errorMsg);
+                    batchJobLogRepository.save(jobLog);
                 }
             }
         };
