@@ -6,7 +6,7 @@
 
 ## 1. System Architecture (시스템 구조)
 
-BizFlow 플랫폼은 다수의 외부 기관(은행, 카드사, 행정망 등)과의 안정적인 파일 연계 및 실시간 REST API 통신을 제어하고 실시간 관제하기 위해 아래와 같이 계층화된 클라우드 네이티브 아키텍처를 따릅니다.
+BizFlow 플랫폼은 다수의 외부 기관(금융 결제망 및 공공 데이터 포털)과의 안정적인 파일 연계 및 실시간 REST API 통신을 제어하고 실시간 관제하기 위해 아래와 같이 계층화된 아키텍처를 따릅니다.
 
 ```mermaid
 graph TD
@@ -35,8 +35,8 @@ graph TD
     end
 
     subgraph Infra & Data Layer
-        RDS[(AWS RDS - PostgreSQL)]
-        S3[(AWS S3 Storage)]
+        RDS[(PostgreSQL Database)]
+        S3[(AWS S3 Storage Mock)]
         LocalDir[(Local Fallback Storage)]
     end
 
@@ -86,29 +86,34 @@ sequenceDiagram
     Operator->>UI: 정합성 검사 배치 실행 버튼 클릭
     UI->>Batch: JobLauncher.run(settlementVerificationJob)
     
-    Batch->>DB: APPROVED 상태 정산 목록 조회
-    DB-->>Batch: 정산 요청 목록 반환
+    Batch->>DB: 내부 정산 요청 및 외부 Mock 데이터 전체 조회
+    DB-->>Batch: 데이터 반환
     
-    loop 각 정산 요청 건에 대하여 대조
-        Batch->>ExtAPI: 외부 거래 내역 및 정산 실적 조회 API 호출
-        ExtAPI-->>Batch: 외부 정산 금액 회신 (externalAmount)
-        
-        alt 내부 금액 == 외부 금액 (MATCHED)
-            Batch->>DB: 상태 업데이트 (reconciliationStatus = MATCHED)
-        else 내부 금액 != 외부 금액 (MISMATCHED)
-            Batch->>DB: 상태 업데이트 (reconciliationStatus = MISMATCHED)
-            Note over Batch: Exception 유도 및 배치 실행 FAILED 처리
-        end
+    Note over Batch: 5가지 정합성 검증 규칙에 의거 대조 분석
+    
+    alt 금액 대조 통과 (MATCHED)
+        Batch->>DB: 상태 업데이트 (reconciliationStatus = MATCHED)
+    else 금액 대조 불일치 (MISMATCHED)
+        Batch->>DB: 상태 업데이트 (reconciliationStatus = MISMATCHED)
+        Note over Batch: FAILED 로그 기록 및 수동 재처리 대기
+    else 외부 실적 누락 (MISSING_EXTERNAL)
+        Batch->>DB: 상태 업데이트 (reconciliationStatus = MISSING_EXTERNAL)
+    else 내부 요청 없음 (UNKNOWN_EXTERNAL)
+        Batch->>DB: 결과 테이블 저장 (reconciliationStatus = UNKNOWN_EXTERNAL)
+    else 미승인 실적 존재 (INVALID_STATUS)
+        Batch->>DB: 상태 업데이트 (reconciliationStatus = INVALID_STATUS)
     end
     
     Batch-->>UI: Job 완료 또는 실패 상태 전송
-    UI-->>Operator: 대시보드 스탯 갱신 및 에러 뱃지 표출
+    UI-->>Operator: 대시보드 요약 갱신 및 에러 뱃지 표출
 ```
 
-### 정합성 검증 상태 유형
-* **UNVERIFIED**: 최초 정산 등록 시 상태이며, 검증 배치가 아직 수행되지 않은 대기 상태입니다.
-* **MATCHED**: 내부 정산 요청액과 외부 연계 기관의 실제 거래 금액이 1원 단위까지 완벽하게 일치하여 검증 통과한 상태입니다.
-* **MISMATCHED**: 내부 요청액과 외부 금액이 서로 다르거나 거래 정보 불일치가 발생한 장애 상태로, 배치 Job이 에러를 발생시키며 즉시 중단됩니다.
+### 정합성 검증 상태 유형 (5대 규칙)
+1. **MATCHED**: `APPROVED` 상태의 내부 정산 요청과 외부 실적이 존재하고 금액이 같음.
+2. **MISMATCHED**: `APPROVED` 상태의 내부 정산 요청과 외부 실적이 존재하지만 금액이 다름.
+3. **MISSING_EXTERNAL**: `APPROVED` 상태의 내부 정산 요청이 존재하지만 외부 실적이 없음.
+4. **UNKNOWN_EXTERNAL**: 내부 정산 요청 기록 없이 외부 실적만 존재하는 경우.
+5. **INVALID_STATUS**: 내부 정산 요청 상태가 `APPROVED`가 아님(REQUESTED, ASSIGNED 등)에도 외부 실적이 존재하는 경우.
 
 ---
 
@@ -123,14 +128,14 @@ graph TD
     S3Upload --> SaveDB1[DB 파일 메타데이터 저장 - S3 URL 포함]
     
     CheckS3 -->|NO/Connection Timeout| Fallback[Local Fallback 구동]
-    Fallback --> LocalUpload[E:/Aws/uploads/ 경로에 백업 저장]
-    LocalUpload --> SaveDB2[DB 파일 메타데이터 저장 - 로컬 절대경로 포함]
+    Fallback --> LocalUpload[relative ./uploads/ 경로에 백업 저장]
+    LocalUpload --> SaveDB2[DB 파일 메타데이터 저장 - 로컬 경로 포함]
     
     SaveDB1 --> Return[성공 응답 반환]
     SaveDB2 --> Return
 ```
 
-* **이메일 및 자격 증명 보안**: AWS 접근 정보가 누락되거나 잘못된 자격 증명이 주입되어도, `S3Config`에서 이를 안전하게 감지하여 더미 클라이언트를 바인딩하고 로컬 Fallback 저장소를 자동 가동시키므로 애플리케이션 시작 장애가 절대 발생하지 않습니다.
+* **자가 치유 기능**: AWS S3 버킷 권한 누락이나 인터넷 장애 발생 시 즉각 로컬 디스크의 `./uploads` 경로로 저장 위치가 우회되며, 메타데이터에 파일의 실제 저장 타입(S3_MOCK 또는 LOCAL)이 영속화됩니다. 다운로드 요청 시에도 이 메타데이터를 파악해 최적의 경로에서 바이너리를 안전하게 반환합니다.
 
 ---
 
@@ -138,10 +143,10 @@ graph TD
 
 플랫폼 내부 보안을 위해 사용자의 **Role**에 따라 메뉴 조회 및 배치 조작 등의 액션 범위가 엄격하게 분기됩니다.
 
-| Role | 정산 목록 조회 | 신규 정산 등록 | 담당자 배정 | 승인 / 반려 처리 | 배치 수동 기동 및 재처리 |
-| :--- | :---: | :---: | :---: | :---: | :---: |
-| **ROLE_ADMIN** | O | O | O | O | O |
-| **ROLE_OPERATOR** | O | O | O | O | O |
-| **ROLE_USER** | O | O | X | X | X |
+| Role | 정산 목록 조회 | 신규 정산 등록 | 담당자 배정 | 승인 / 반려 처리 | 배치 수동 기동 | 실패 건 수동 재처리 |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+| **ROLE_ADMIN** | O | O | O | O | O | O (전용) |
+| **ROLE_OPERATOR** | O | O | O | O | O | X |
+| **ROLE_USER** | O (본인 한정) | O (본인 한정) | X | X | X | X |
 
 * **Security Filter**: JWT 유효성을 매 API 호출마다 파싱하여 인증 객체를 생성하고, Spring Security의 `@PreAuthorize` 및 URL 매칭 룰에 의해 인가 처리가 수행됩니다.

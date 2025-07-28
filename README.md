@@ -1,68 +1,147 @@
 # BizFlow Operations Platform
 
-BizFlow Operations Platform은 외부 기관(금융 결제망 및 공공 데이터 포털)과의 대용량 파일/API 연계 처리를 자동화하고, 내부 정산 요청 내역과 외부 연계 실적 데이터 간의 정합성을 실시간 대조(Reconciliation) 및 모니터링하기 위한 통합 관리 플랫폼입니다.
+BizFlow Operations Platform은 기업 내부 정산 프로세스와 외부 연계 기관(금융망 등)의 실적 데이터를 안전하게 연계하고, 데이터 간 정합성을 실시간 대조(Reconciliation)하여 검증 및 재처리할 수 있는 실무형 운영 관리 시스템입니다.
+
+단순한 CRUD 수준을 넘어 공공/금융 분야에서 흔히 사용되는 **정합성 대조 프로세스**, **Spring Batch 기반 배치 연계**, **장애 복구 Fallback 아키텍처**를 포트폴리오용으로 통합 설계하였습니다.
 
 ---
 
-## 🛠️ Key Features (핵심 기능)
+## 🛠️ 기술 스택
 
-1. **업무 요청 및 정산증빙 프로세스 관리**
-   - 사용자별 권한(`ADMIN`, `OPERATOR`, `USER`) 등급에 따른 메뉴 접근 및 API 제어.
-   - 신규 정산 요청 등록, 증빙서류 업로드(S3 연계), 담당자 배정 및 최종 승인/반려 상태 전이 파이프라인.
-2. **Spring Batch 5.x 기반 대용량 데이터 연계**
-   - 청크 지향 처리(Chunk-oriented Processing)를 적용해 대량 정산 거래 내역 로드 시 부하 조절.
-   - 배치 가동 상태, 처리 이력, 성공/실패 여부를 메타데이터 테이블 및 이력 테이블에 자동 관리.
-3. **정합성 대조 검증 (Reconciliation) 및 실패 재처리 (Retry)**
-   - 승인 완료된 정산 데이터와 외부 수신 거래 실적을 일대일로 비교 검증.
-   - 불일치 발생 시 즉각 실패 기록을 남기고 배치를 중단하며, 조치 후 운영자가 대시보드에서 즉각 **수동 재처리(Retry)**할 수 있는 복구 환경 제공.
-4. **S3 파일 연계 및 장애 극복 (Local Fallback)**
-   - AWS S3 스토리지 연동 파일 백업 처리.
-   - S3 등 외부 인프라 장애 발생 시 시스템 중단 없이 로컬 백업 저장소(`uploads/`)로 자동 우회 작동하는 장애 방어형 설계.
-5. **실시간 관제 웹 대시보드**
-   - 실시간 연계 현황 요약 스탯, 정산 검토 테이블, 배치 기동/재기동 제어 버튼, 그리고 텍스트 로그 터미널 모니터 포함.
+* **Language**: Java 17
+* **Framework**: Spring Boot 3.2.5
+* **Build Tool**: Gradle
+* **Security**: Spring Security & JWT 인증 (JSON Web Token)
+* **Data Access**: Spring Data JPA
+* **Database**: PostgreSQL 15 (Alpine)
+* **Batch Engine**: Spring Batch 5.x / Spring Scheduler
+* **API Documentation**: Springdoc OpenAPI (Swagger UI)
+* **Storage Interface**: AWS S3 SDK (Mock 클라이언트 내장) & 로컬 파일시스템 Fallback
+* **Containerization**: Docker & Docker Compose
+* **Test Tool**: JUnit 5 & AssertJ
 
 ---
 
-## 📂 Project Structure (디렉토리 구조)
+## 🔐 권한별 기능 (Role Matrix)
 
-```text
-E:\Aws (Root)
-├── backend/                       # 스프링 부트 백엔드 모듈
-│   ├── build.gradle               # 의존성 및 빌드 설정
-│   ├── settings.gradle
-│   ├── Dockerfile                 # 컨테이너 빌드 이미지 설정
-│   └── src/
-│       └── main/
-│           ├── java/              # Java 소스 코드
-│           └── resources/
-│               ├── application.yml # 환경 설정 (DB, AWS, JWT)
-│               └── static/        # 관제 대시보드 웹 UI 리소스 (HTML/CSS/JS)
-├── docs/                          # 시스템 문서 폴더
-│   └── architecture.md            # 시스템 아키텍처 및 정합성 대조 흐름 정의서
-├── docker-compose.yml             # 로컬 테스트 및 DB/App 통합 가동 스크립트
-└── README.md                      # 본 문서
-```
+시스템 보안을 위해 3단계 역할(`ADMIN`, `OPERATOR`, `USER`) 권한을 제공하며, 각 역할에 맞는 API 접근이 통제됩니다.
+
+* **ADMIN (관리자)**
+  - 모든 정산 및 업무 요청 내역 전체 조회 가능
+  - 정산 요청 심사 (승인 및 반려) 가능
+  - 정합성 검증 배치 실행 가능
+  - **실패 배치 건 수동 재처리(Retry) 가능 (ADMIN 전용 기능)**
+* **OPERATOR (운영자)**
+  - 모든 정산 및 업무 요청 내역 전체 조회 가능
+  - 정산 요청 담당자 배정 가능
+  - 정산 요청 심사 (승인 및 반려) 가능
+  - 정합성 검증 배치 실행 가능 (재처리 실행은 불가)
+* **USER (일반 사용자)**
+  - 본인이 등록한 정산 요청서 작성 및 업로드 가능
+  - 본인이 등록한 정산 건 및 증빙에 대해서만 조회 가능
+  - 본인 요청 건에 증빙 파일 업로드 가능
+  - 승인/반려/배정 및 배치 기동 제어 일체 불가
 
 ---
 
-## 🚀 Quick Start (로컬 가동 및 테스트)
+## 📊 정합성 검증 규칙 (Reconciliation Logic)
+
+배치 엔진은 다음 5가지 시나리오 규칙을 기준으로 대조(Reconciliation)를 실시하여 정합성 위배 사항을 완전하게 필터링합니다.
+
+| 규칙 | 구분 | 조건 및 판정 기준 | 정합성 코드 (reconciliationStatus) |
+| :--- | :--- | :--- | :---: |
+| **규칙 1** | **정상 일치** | `APPROVED` 내부 정산 요청과 외부 실적이 존재하고 금액이 같음 | **MATCHED** |
+| **규칙 2** | **금액 불일치** | `APPROVED` 내부 정산 요청과 외부 실적이 존재하나 금액이 다름 | **MISMATCHED** |
+| **규칙 3** | **외부 실적 누락** | `APPROVED` 내부 정산 요청이 존재하지만 외부 실적 데이터가 없음 | **MISSING_EXTERNAL** |
+| **규칙 4** | **내부 요청 누락** | 내부 정산 요청 기록이 존재하지 않으나 외부 연계 실적만 존재함 | **UNKNOWN_EXTERNAL** |
+| **규칙 5** | **미승인 거래 존재** | 내부 정산 요청 상태가 `APPROVED`가 아님(REQUESTED 등)에도 외부 실적이 존재함 | **INVALID_STATUS** |
+
+---
+
+## 🚀 핵심 동작 시나리오
+
+1. **사용자 로그인**: 일반 사용자(`user`), 운영자(`operator`), 관리자(`admin`) 중 하나로 로그인하여 JWT 토큰을 획득합니다.
+2. **정산 요청 및 파일 첨부**: 일반 사용자가 신규 정산 요청을 등록하고 증빙 서류를 업로드합니다.
+3. **담당자 배정 및 최종 승인**: 운영자가 해당 정산 요청 건에 담당 운영자를 배정하고 서류 검증 후 최종 '승인(APPROVED)' 처리합니다.
+4. **외부 실적 데이터 Mock 유입**: 배치 연계 대조를 위해 외부 결제 기관에서 수신된 거래 실적 Mock 데이터를 생성합니다. (5대 규칙 검증용 시나리오 데이터)
+5. **정합성 대조 배치 실행**: 정합성 검증 배치를 작동시켜 실적 대조를 실시하고 `ReconciliationResult` 테이블에 상세 결과를 적재합니다. (정합성 에러 발생 시 배치는 실패 처리됨)
+6. **대시보드 모니터링**: 대시보드 스탯 요약 카드, 배치 로그 이력, 정합성 위배 상세 내역을 한눈에 파악합니다.
+7. **실패 건 재처리 (ADMIN 전용)**: 정합성 미달로 FAILED 처리된 배치 건을 관리자가 예외 조치 후 즉시 수동 **재처리(Retry)**하여 대조 완료 상태로 갱신합니다.
+
+---
+
+## 🖥️ 주요 API 명세
+
+### 1. 인증 및 계정 (Auth)
+* `POST /api/auth/login` : 사용자 로그인 및 JWT 발급
+* `POST /api/auth/signup` : 신규 사용자 가입 등록
+
+### 2. 정산 업무 관리 (Settlement)
+* `POST /api/settlements` : 신규 정산 요청 등록
+* `GET /api/settlements` : 정산 요청 목록 조회 (USER는 본인 건만 조회)
+* `GET /api/settlements/{id}` : 정산 요청 상세 조회
+* `PATCH /api/settlements/{id}/assign` : 담당 운영자 배정
+* `PATCH /api/settlements/{id}/approve` : 정산 최종 승인 처리
+* `PATCH /api/settlements/{id}/reject` : 정산 최종 반려 처리
+
+### 3. 증빙 관리 (Attachment)
+* `POST /api/settlements/{id}/attachments` : 정산 건 증빙 파일 첨부 업로드
+* `GET /api/settlements/{id}/attachments` : 정산 건 첨부파일 메타데이터 조회
+* `GET /api/settlements/{id}/attachments/download` : 증빙 파일 다운로드
+
+### 4. 외부 실적 연계 Mock (External Result Mock)
+* `POST /api/external-results/mock` : 테스트용 외부 실적 데이터 수동 생성
+* `GET /api/external-results` : 수신된 외부 실적 전체 조회
+
+### 5. 정합성 및 배치 제어 (Reconciliation & Batch)
+* `POST /api/batches/reconciliation/run` : 정합성 대조 검증 배치 실행 (mockFailure 옵션 지원)
+* `POST /api/batches/reconciliation/retry` : 실패한 배치 강제 수동 재기동 (ADMIN 전용)
+* `GET /api/batches/logs` : 배치 작업 이력 전체 조회
+* `GET /api/reconciliation-results` : 정합성 검증 상세 결과 목록 조회
+
+### 6. 대시보드 통계 (Dashboard)
+* `GET /api/dashboard/summary` : 대시보드 요약 통계 정보 조회
+
+---
+
+## 💾 Local Fallback & S3 인프라 아키텍처
+
+파일 업로드 및 다운로드 서비스는 클라우드 분리 구조로 설계되었습니다.
+1. 기본적으로 AWS S3 스토리지에 파일을 업로드하도록 작동합니다.
+2. 만약 S3 접속 오류, 자격 증명 누락 등의 예외 상황(Exception)이 감지되면 즉각 **로컬 파일시스템(./uploads)** 디렉토리로 백업 저장하는 Fallback 로직이 구동됩니다.
+3. 메타데이터 테이블(`attachments`)의 `storageType` 컬럼에 `S3_MOCK` 또는 `LOCAL` 이 영속화되어, 다운로드 요청 시 유연하게 복구 동작이 이어집니다.
+
+---
+
+## 🏃 실행 방법 (Quick Start)
 
 ### 1. 전제 조건
-* 로컬 PC에 **Java 17** 및 **Docker**가 설치되어 있어야 합니다.
+* 시스템에 **Docker** 및 **Docker Compose**가 기동 중이어야 합니다.
 
-### 2. 컨테이너 가동
-루트 디렉토리에서 아래 명령어를 실행하여 PostgreSQL 및 Spring Boot 앱을 동시에 실행합니다.
+### 2. 가동 및 컴파일
+프로젝트 루트 디렉토리(docker-compose.yml이 위치한 경로)에서 아래의 명령을 수행합니다.
 ```bash
-docker-compose up --build -d
+docker-compose up --build
 ```
-* **PostgreSQL Port**: `5432` (Database: `batchdb`, User: `postgres`, Password: `password`)
-* **Spring Boot App Port**: `8080`
+PostgreSQL 데이터베이스 컨테이너와 Spring Boot 애플리케이션 컨테이너가 빌드된 후 순차적으로 실행됩니다.
 
-### 3. 웹 서비스 및 API 문서 접속
-* **대시보드 UI**: `http://localhost:8080/`
-* **Swagger API Docs**: `http://localhost:8080/swagger-ui.html`
+* **관제 대시보드 UI**: `http://localhost:8080/`
+* **Swagger API 명세**: `http://localhost:8080/swagger-ui.html`
 
-### 4. 테스트 로그인 정보 (비밀번호: password)
-* **관리자(Admin)**: `admin`
-* **운영자(Operator)**: `operator`
-* **일반 관찰자(User)**: `user`
+---
+
+## 🔑 테스트용 기본 Seed 계정
+시스템 가동 시 로컬 환경에서의 즉각적인 테스트를 돕기 위해 3개의 역할별 테스트 계정이 자동 생성(Data Seeding)됩니다. (비밀번호는 모두 `password`입니다.)
+
+* **관리자(ADMIN)** 사원 계정: `admin` / `password`
+* **운영자(OPERATOR)** 사원 계정: `operator` / `password`
+* **일반사용자(USER)** 사원 계정: `user` / `password`
+
+---
+
+## 🌟 포트폴리오 핵심 강조점
+
+1. **금융/공공 비즈니스 모델 설계**: 실무 정합성 검증의 5대 핵심 시나리오(MATCHED, MISMATCHED, MISSING, UNKNOWN, INVALID)를 충실하게 모델링하고 배치 스텝으로 자동화하였습니다.
+2. **장애 방어형 파일 서비스 (Fallback)**: 클라우드 인프라 장애 발생을 대비한 Local Fallback 구조 설계로 시스템 연속성을 보장합니다.
+3. **보안 인프라**: JWT 무상태 세션 인증을 이용하며, Spring Security 및 `@PreAuthorize`로 역할별 API 보안을 철저하게 분기 통제합니다.
+4. **Spring Batch 5.x 정합**: Spring Boot 3.x 환경에 대응하는 Spring Batch 5.x JobRepository 아키텍처를 온전히 수용하여 빌드하였습니다.
