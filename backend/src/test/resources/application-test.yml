@@ -1,0 +1,26 @@
+spring:
+  datasource:
+    url: jdbc:h2:mem:batchdb;MODE=PostgreSQL;DB_CLOSE_DELAY=-1;DATABASE_TO_UPPER=false
+    username: sa
+    password:
+    driver-class-name: org.h2.Driver
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    show-sql: false
+  batch:
+    jdbc:
+      initialize-schema: always
+    job:
+      enabled: false
+
+jwt:
+  secret: dGhpcy1pcy1hLXNhbXBsZS1zZWNyZXQta2V5LWZvci1qd3Qtc2hhMjU2LWFsaWduZWQtcHJpdmFjeQ==
+  expiration: 86400000
+
+aws:
+  s3:
+    bucket: test-bucket
+    region: ap-northeast-2
+    access-key: aws_access_key_placeholder
+    secret-key: aws_secret_key_placeholder

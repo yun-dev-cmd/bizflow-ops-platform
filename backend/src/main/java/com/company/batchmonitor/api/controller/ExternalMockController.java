@@ -9,12 +9,17 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
 
 import java.time.LocalDateTime;
 import java.util.List;
 
-@Tag(name = "External Mock Data Management", description = "외부 연계 실적 Mock 데이터 생성 및 조회 API")
+@Tag(name = "External Mock Data Management", description = "External reconciliation mock data APIs")
 @RestController
 @RequestMapping("/api/external-results")
 @RequiredArgsConstructor
@@ -22,9 +27,14 @@ public class ExternalMockController {
 
     private final ExternalResultRepository externalResultRepository;
 
-    @Operation(summary = "외부 연계 Mock 데이터 생성", description = "대조 검증용 외부 실적 데이터를 Mock으로 강제 주입합니다.")
+    @Operation(summary = "Create external mock result")
     @PostMapping("/mock")
+    @Transactional
     public ResponseEntity<ExternalResult> createMockResult(@Valid @RequestBody ExternalMockRequest request) {
+        if (request.getSettlementRequestId() != null) {
+            externalResultRepository.deleteBySettlementRequestId(request.getSettlementRequestId());
+        }
+
         ExternalResult externalResult = ExternalResult.builder()
                 .externalTransactionId(request.getExternalTransactionId())
                 .settlementRequestId(request.getSettlementRequestId())
@@ -33,15 +43,13 @@ public class ExternalMockController {
                 .receivedAt(LocalDateTime.now())
                 .build();
 
-        ExternalResult saved = externalResultRepository.save(externalResult);
-        return ResponseEntity.ok(saved);
+        return ResponseEntity.ok(externalResultRepository.save(externalResult));
     }
 
-    @Operation(summary = "외부 실적 전체 조회", description = "수신된 외부 연계 실적 목록을 전체 조회합니다. (ADMIN/OPERATOR 필요)")
+    @Operation(summary = "List external results")
     @PreAuthorize("hasAnyRole('ADMIN', 'OPERATOR')")
     @GetMapping
     public ResponseEntity<List<ExternalResult>> getExternalResults() {
-        List<ExternalResult> results = externalResultRepository.findAll();
-        return ResponseEntity.ok(results);
+        return ResponseEntity.ok(externalResultRepository.findAll());
     }
 }

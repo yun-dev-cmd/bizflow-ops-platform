@@ -59,8 +59,6 @@ public class BatchJobLog {
         this.retryCount += 1;
         this.retriedBy = operatorName;
         this.retriedAt = LocalDateTime.now();
-        this.status = "RUNNING";
-        this.startedAt = LocalDateTime.now();
     }
 
     public void updateStatus(String status) {

@@ -1,6 +1,10 @@
 package com.company.batchmonitor.global.config;
 
-import com.company.batchmonitor.domain.*;
+import com.company.batchmonitor.domain.BatchJobLog;
+import com.company.batchmonitor.domain.ExternalResult;
+import com.company.batchmonitor.domain.Role;
+import com.company.batchmonitor.domain.SettlementRequest;
+import com.company.batchmonitor.domain.User;
 import com.company.batchmonitor.repository.BatchJobLogRepository;
 import com.company.batchmonitor.repository.ExternalResultRepository;
 import com.company.batchmonitor.repository.SettlementRequestRepository;
@@ -25,47 +29,45 @@ public class DataInitializer implements CommandLineRunner {
     private final PasswordEncoder passwordEncoder;
 
     @Override
-    public void run(String... args) throws Exception {
-        log.info("====== Starting Default Data Initialization ======");
+    public void run(String... args) {
+        log.info("Starting default data initialization");
 
-        // 1. 기본 관리자 및 사용자 생성
         User admin = userRepository.findByUsername("admin").orElseGet(() -> {
-            User u = User.builder()
+            User user = User.builder()
                     .username("admin")
                     .password(passwordEncoder.encode("password"))
-                    .name("김철수 주무관")
+                    .name("Default Admin")
                     .role(Role.ROLE_ADMIN)
                     .build();
-            userRepository.save(u);
-            log.info("Created default administrator: admin / password");
-            return u;
+            userRepository.save(user);
+            log.info("Created default admin account");
+            return user;
         });
 
         User operator = userRepository.findByUsername("operator").orElseGet(() -> {
-            User u = User.builder()
+            User user = User.builder()
                     .username("operator")
                     .password(passwordEncoder.encode("password"))
-                    .name("이영희 대리")
+                    .name("Default Operator")
                     .role(Role.ROLE_OPERATOR)
                     .build();
-            userRepository.save(u);
-            log.info("Created default operator: operator / password");
-            return u;
+            userRepository.save(user);
+            log.info("Created default operator account");
+            return user;
         });
 
-        User user = userRepository.findByUsername("user").orElseGet(() -> {
-            User u = User.builder()
+        User requester = userRepository.findByUsername("user").orElseGet(() -> {
+            User user = User.builder()
                     .username("user")
                     .password(passwordEncoder.encode("password"))
-                    .name("박민수 사원")
+                    .name("Default User")
                     .role(Role.ROLE_USER)
                     .build();
-            userRepository.save(u);
-            log.info("Created default user: user / password");
-            return u;
+            userRepository.save(user);
+            log.info("Created default user account");
+            return user;
         });
 
-        // 2. 기본 배치 실행 이력 생성
         if (batchJobLogRepository.count() == 0) {
             BatchJobLog jobLog = BatchJobLog.builder()
                     .jobName("settlementVerificationJob")
@@ -74,22 +76,18 @@ public class DataInitializer implements CommandLineRunner {
                     .status("SUCCESS")
                     .successCount(1)
                     .failCount(0)
-                    .errorMessage("정산 검증 배치가 정상 완료되었습니다.")
+                    .errorMessage("Initial batch log seed")
                     .retryCount(0)
                     .isRetried(false)
                     .build();
             batchJobLogRepository.save(jobLog);
-            log.info("Created default batch log records.");
         }
 
-        // 3. 테스트용 정산 요청 및 외부 Mock 실적 데이터 생성
         if (settlementRequestRepository.count() == 0) {
-            
-            // 시나리오 1. 정상 일치 (MATCHED)
-            SettlementRequest req1 = SettlementRequest.builder()
-                    .title("[정상] 2026년 6월 농협 연계 수수료 청구")
-                    .amount(1500000L)
-                    .requester(user)
+            SettlementRequest matched = SettlementRequest.builder()
+                    .title("[MATCHED] June platform settlement fee")
+                    .amount(1_500_000L)
+                    .requester(requester)
                     .assignedOperator(operator)
                     .status("APPROVED")
                     .externalSyncStatus("PENDING")
@@ -97,22 +95,20 @@ public class DataInitializer implements CommandLineRunner {
                     .createdAt(LocalDateTime.now().minusDays(1))
                     .updatedAt(LocalDateTime.now().minusHours(2))
                     .build();
-            req1 = settlementRequestRepository.save(req1);
+            matched = settlementRequestRepository.save(matched);
 
-            ExternalResult ext1 = ExternalResult.builder()
+            externalResultRepository.save(ExternalResult.builder()
                     .externalTransactionId("TX_MOCK_001_MATCHED")
-                    .settlementRequestId(req1.getId())
-                    .externalAmount(1500000L)
+                    .settlementRequestId(matched.getId())
+                    .externalAmount(1_500_000L)
                     .externalStatus("APPROVED")
                     .receivedAt(LocalDateTime.now().minusHours(1))
-                    .build();
-            externalResultRepository.save(ext1);
+                    .build());
 
-            // 시나리오 2. 금액 불일치 (MISMATCHED)
-            SettlementRequest req2 = SettlementRequest.builder()
-                    .title("[금액불일치] 2026년 6월 국민카드 정산 결제")
-                    .amount(2500000L)
-                    .requester(user)
+            SettlementRequest mismatched = SettlementRequest.builder()
+                    .title("[MISMATCHED] June card settlement")
+                    .amount(2_500_000L)
+                    .requester(requester)
                     .assignedOperator(operator)
                     .status("APPROVED")
                     .externalSyncStatus("PENDING")
@@ -120,68 +116,58 @@ public class DataInitializer implements CommandLineRunner {
                     .createdAt(LocalDateTime.now().minusDays(2))
                     .updatedAt(LocalDateTime.now().minusHours(3))
                     .build();
-            req2 = settlementRequestRepository.save(req2);
+            mismatched = settlementRequestRepository.save(mismatched);
 
-            ExternalResult ext2 = ExternalResult.builder()
+            externalResultRepository.save(ExternalResult.builder()
                     .externalTransactionId("TX_MOCK_002_MISMATCHED")
-                    .settlementRequestId(req2.getId())
-                    .externalAmount(2400000L) // 10만원 차이 발생
+                    .settlementRequestId(mismatched.getId())
+                    .externalAmount(2_400_000L)
                     .externalStatus("APPROVED")
                     .receivedAt(LocalDateTime.now().minusHours(1))
-                    .build();
-            externalResultRepository.save(ext2);
+                    .build());
 
-            // 시나리오 3. 외부 데이터 누락 (MISSING_EXTERNAL)
-            SettlementRequest req3 = SettlementRequest.builder()
-                    .title("[외부누락] 2026년 5월 소급분 지방세 수납")
-                    .amount(3500000L)
-                    .requester(user)
+            settlementRequestRepository.save(SettlementRequest.builder()
+                    .title("[MISSING_EXTERNAL] May local tax payment")
+                    .amount(3_500_000L)
+                    .requester(requester)
                     .assignedOperator(admin)
                     .status("APPROVED")
                     .externalSyncStatus("PENDING")
                     .reconciliationStatus("UNVERIFIED")
                     .createdAt(LocalDateTime.now().minusDays(3))
                     .updatedAt(LocalDateTime.now().minusHours(4))
-                    .build();
-            settlementRequestRepository.save(req3);
-            // 외부 실적 없음
+                    .build());
 
-            // 시나리오 4. 내부 요청 없이 외부 데이터만 존재 (UNKNOWN_EXTERNAL)
-            ExternalResult ext4 = ExternalResult.builder()
+            externalResultRepository.save(ExternalResult.builder()
                     .externalTransactionId("TX_MOCK_004_UNKNOWN")
-                    .settlementRequestId(null) // 매핑 없음
-                    .externalAmount(800000L)
+                    .settlementRequestId(null)
+                    .externalAmount(800_000L)
                     .externalStatus("APPROVED")
                     .receivedAt(LocalDateTime.now().minusHours(1))
-                    .build();
-            externalResultRepository.save(ext4);
+                    .build());
 
-            // 시나리오 5. 승인되지 않은 요청에 대한 외부 실적 존재 (INVALID_STATUS)
-            SettlementRequest req5 = SettlementRequest.builder()
-                    .title("[미승인실적] 2026년 6월 카카오페이 가맹점 정산")
-                    .amount(4500000L)
-                    .requester(user)
+            SettlementRequest invalid = SettlementRequest.builder()
+                    .title("[INVALID_STATUS] June franchise settlement")
+                    .amount(4_500_000L)
+                    .requester(requester)
                     .assignedOperator(operator)
-                    .status("REQUESTED") // 승인 안됨
+                    .status("REQUESTED")
                     .externalSyncStatus("PENDING")
                     .reconciliationStatus("UNVERIFIED")
                     .createdAt(LocalDateTime.now().minusDays(1))
                     .updatedAt(LocalDateTime.now().minusHours(5))
                     .build();
-            req5 = settlementRequestRepository.save(req5);
+            invalid = settlementRequestRepository.save(invalid);
 
-            ExternalResult ext5 = ExternalResult.builder()
+            externalResultRepository.save(ExternalResult.builder()
                     .externalTransactionId("TX_MOCK_005_INVALID")
-                    .settlementRequestId(req5.getId())
-                    .externalAmount(4500000L)
+                    .settlementRequestId(invalid.getId())
+                    .externalAmount(4_500_000L)
                     .externalStatus("APPROVED")
                     .receivedAt(LocalDateTime.now().minusHours(1))
-                    .build();
-            externalResultRepository.save(ext5);
-
-            log.info("Created default mock settlement requests and external results for 5 verification scenarios.");
+                    .build());
         }
 
-        log.info("====== Default Data Initialization Completed ======");
+        log.info("Default data initialization completed");
     }
 }

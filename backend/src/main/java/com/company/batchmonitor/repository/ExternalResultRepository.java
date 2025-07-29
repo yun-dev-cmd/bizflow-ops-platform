@@ -6,4 +6,5 @@ import java.util.Optional;
 
 public interface ExternalResultRepository extends JpaRepository<ExternalResult, String> {
     Optional<ExternalResult> findBySettlementRequestId(Long settlementRequestId);
+    void deleteBySettlementRequestId(Long settlementRequestId);
 }
