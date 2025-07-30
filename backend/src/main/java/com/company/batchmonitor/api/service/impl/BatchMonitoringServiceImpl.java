@@ -40,7 +40,6 @@ public class BatchMonitoringServiceImpl implements BatchMonitoringService {
     }
 
     @Override
-    @Transactional
     public void triggerJob(String jobName, String operatorName, boolean mockFailure) {
         log.info("Batch manual trigger started: job={}, operator={}, mockFailure={}", jobName, operatorName, mockFailure);
         
@@ -92,7 +91,6 @@ public class BatchMonitoringServiceImpl implements BatchMonitoringService {
     }
 
     @Override
-    @Transactional
     public void retryFailedJob(Long logId, String operatorName) {
         log.info("Batch manual retry started: logId={}, operator={}", logId, operatorName);
 
