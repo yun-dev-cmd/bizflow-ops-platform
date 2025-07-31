@@ -219,7 +219,11 @@ class SettlementVerificationTest {
     }
 
     private void retryReconciliation(String token, long logId) throws Exception {
-        postJson(token, "/api/batches/reconciliation/retry", Map.of("logId", logId));
+        mockMvc.perform(post("/api/batches/reconciliation/retry")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsBytes(Map.of("logId", logId))))
+                .andExpect(status().isOk());
     }
 
     private JsonNode getJson(String token, String path) throws Exception {
