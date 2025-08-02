@@ -60,11 +60,6 @@ public class SettlementVerificationBatchConfig {
     @Bean
     public Tasklet settlementReconciliationTasklet() {
         return (contribution, chunkContext) -> {
-            String mockFailure = String.valueOf(chunkContext.getStepContext().getJobParameters().get("mockFailure"));
-            if (Boolean.parseBoolean(mockFailure)) {
-                throw new IllegalStateException("Mock reconciliation failure requested.");
-            }
-
             List<SettlementRequest> requests = settlementRequestRepository.findAll();
             List<ExternalResult> externalResults = externalResultRepository.findAll();
             log.info("Loaded {} settlement requests and {} external results", requests.size(), externalResults.size());

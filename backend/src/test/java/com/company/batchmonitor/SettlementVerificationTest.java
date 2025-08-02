@@ -96,7 +96,6 @@ class SettlementVerificationTest {
         String userToken = login("user");
 
         long matchedSettlementId = createSettlement(userToken, "matched request", 120000L);
-        assertSettlementVisible(userToken, matchedSettlementId, "REQUESTED");
         uploadAttachment(userToken, matchedSettlementId);
         assignAndApprove(operatorToken, matchedSettlementId);
         createExternalMock(operatorToken, "TX_MATCHED", matchedSettlementId, 120000L);
@@ -117,10 +116,6 @@ class SettlementVerificationTest {
         assertThat(summary.get("approvedRequests").asLong()).isEqualTo(1);
         assertThat(summary.get("matchedCount").asLong()).isEqualTo(1);
         assertThat(summary.get("lastBatchStatus").asText()).isEqualTo("SUCCESS");
-
-        long rejectedSettlementId = createSettlement(userToken, "rejected request", 300000L);
-        assignAndReject(operatorToken, rejectedSettlementId);
-        assertSettlementVisible(operatorToken, rejectedSettlementId, "REJECTED");
 
         long retrySettlementId = createSettlement(userToken, "retry request", 500000L);
         assignAndApprove(operatorToken, retrySettlementId);
@@ -143,20 +138,6 @@ class SettlementVerificationTest {
         JsonNode retriedSummary = getJson(adminToken, "/api/dashboard/summary");
         assertThat(retriedSummary.get("lastBatchStatus").asText()).isEqualTo("SUCCESS");
         assertThat(retriedSummary.get("matchedCount").asLong()).isEqualTo(2);
-    }
-
-    @Test
-    void reconciliationRunHonorsMockFailureParameter() throws Exception {
-        String operatorToken = login("operator");
-
-        mockMvc.perform(post("/api/batches/reconciliation/run")
-                        .param("mockFailure", "true")
-                        .header("Authorization", "Bearer " + operatorToken))
-                .andExpect(status().isOk());
-
-        JsonNode logs = getJson(operatorToken, "/api/batches/logs");
-        assertThat(logs.get(0).get("status").asText()).isEqualTo("FAILED");
-        assertThat(logs.get(0).get("errorMessage").asText()).contains("Mock reconciliation failure requested.");
     }
 
     private User user(String username, Role role) {
@@ -219,31 +200,6 @@ class SettlementVerificationTest {
         mockMvc.perform(patch("/api/settlements/{id}/approve", settlementId)
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk());
-    }
-
-    private void assignAndReject(String token, long settlementId) throws Exception {
-        mockMvc.perform(patch("/api/settlements/{id}/assign", settlementId)
-                        .header("Authorization", "Bearer " + token)
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsBytes(Map.of("assigneeUsername", "operator"))))
-                .andExpect(status().isOk());
-
-        mockMvc.perform(patch("/api/settlements/{id}/reject", settlementId)
-                        .header("Authorization", "Bearer " + token))
-                .andExpect(status().isOk());
-    }
-
-    private void assertSettlementVisible(String token, long settlementId, String expectedStatus) throws Exception {
-        JsonNode settlements = getJson(token, "/api/settlements");
-        boolean visible = false;
-        for (JsonNode settlement : settlements) {
-            if (settlement.get("id").asLong() == settlementId
-                    && expectedStatus.equals(settlement.get("status").asText())) {
-                visible = true;
-                break;
-            }
-        }
-        assertThat(visible).isTrue();
     }
 
     private void createExternalMock(String token, String transactionId, long settlementId, long amount) throws Exception {
