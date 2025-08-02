@@ -145,3 +145,57 @@ PostgreSQL 데이터베이스 컨테이너와 Spring Boot 애플리케이션 컨
 2. **장애 방어형 파일 서비스 (Fallback)**: 클라우드 인프라 장애 발생을 대비한 Local Fallback 구조 설계로 시스템 연속성을 보장합니다.
 3. **보안 인프라**: JWT 무상태 세션 인증을 이용하며, Spring Security 및 `@PreAuthorize`로 역할별 API 보안을 철저하게 분기 통제합니다.
 4. **Spring Batch 5.x 정합**: Spring Boot 3.x 환경에 대응하는 Spring Batch 5.x JobRepository 아키텍처를 온전히 수용하여 빌드하였습니다.
+---
+
+## API Flow Verification
+
+Static dashboard integration was checked against the Spring Boot API layer on 2026-06-30.
+
+### Endpoint wiring status
+
+| Dashboard/API flow | Backend implementation |
+| --- | --- |
+| `POST /api/auth/login` | `AuthController` -> `AuthService` -> `UserRepository` |
+| `GET /api/dashboard/summary` | `DashboardController` -> `SettlementRequestRepository`, `ReconciliationResultRepository`, `BatchJobLogRepository` |
+| `POST /api/settlements` | `SettlementController` -> `SettlementService` -> `SettlementRequestRepository`, `UserRepository` |
+| `GET /api/settlements` | `SettlementController` -> `SettlementService` -> `SettlementRequestRepository` |
+| `PATCH /api/settlements/{id}/assign` | `SettlementController` -> `SettlementService` -> `SettlementRequestRepository`, `UserRepository` |
+| `PATCH /api/settlements/{id}/approve` | `SettlementController` -> `SettlementService` -> `SettlementRequestRepository` |
+| `PATCH /api/settlements/{id}/reject` | `SettlementController` -> `SettlementService` -> `SettlementRequestRepository` |
+| `POST /api/settlements/{id}/attachments` | `SettlementController` -> `SettlementService` -> `FileService` -> `AttachmentRepository` |
+| `POST /api/external-results/mock` | `ExternalMockController` -> `ExternalResultRepository` |
+| `POST /api/batches/reconciliation/run` | `BatchReconciliationController` -> `BatchMonitoringService` -> Spring Batch `settlementVerificationJob` |
+| `POST /api/batches/reconciliation/retry` | `BatchReconciliationController` -> `BatchMonitoringService` -> `BatchJobLogRepository` -> Spring Batch retry |
+| `GET /api/batches/logs` | `BatchReconciliationController` -> `BatchMonitoringService` -> `BatchJobLogRepository` |
+| `GET /api/reconciliation-results` | `BatchReconciliationController` -> `BatchMonitoringService` -> `ReconciliationResultRepository` |
+
+### Covered verification flow
+
+The automated integration test `backend/src/test/java/com/company/batchmonitor/SettlementVerificationTest.java` covers the README/static-dashboard flow with seed accounts:
+
+1. Login as `admin`, `operator`, and `user`.
+2. Create a USER settlement request through `POST /api/settlements`.
+3. Upload an evidence file through `POST /api/settlements/{id}/attachments`.
+4. Assign and approve the request as OPERATOR.
+5. Create external mock data through `POST /api/external-results/mock`.
+6. Run reconciliation through `POST /api/batches/reconciliation/run`.
+7. Assert `ReconciliationResult` rows are persisted and exposed by `GET /api/reconciliation-results`.
+8. Assert `BatchJobLog` rows are persisted and exposed by `GET /api/batches/logs`.
+9. Assert `GET /api/dashboard/summary` reflects matched counts and latest batch status.
+10. Create a failed reconciliation case, repair the external mock data, and retry it as ADMIN through `POST /api/batches/reconciliation/retry`.
+
+### Local execution result
+
+`docker-compose up --build` could not be executed in this workspace because Docker and Docker Compose are not installed on the local machine (`docker`, `docker compose`, and `docker-compose` commands are unavailable). The local Java runtime is Java 8 while this project requires Java 17, and no Gradle wrapper is committed under `backend/`, so the Spring Boot test suite could not be executed locally from this checkout.
+
+The static dashboard script was syntax-checked successfully with the bundled Node runtime:
+
+```bash
+node --check backend/src/main/resources/static/js/dashboard.js
+```
+
+For a machine with Docker available, run this verification command from the repository root:
+
+```bash
+docker-compose up --build
+```
