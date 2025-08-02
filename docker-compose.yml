@@ -13,6 +13,11 @@ services:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d batchdb"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
     restart: always
 
   app:
@@ -26,12 +31,16 @@ services:
       RDS_DB_NAME: batchdb
       RDS_USERNAME: postgres
       RDS_PASSWORD: password
+      SPRING_JPA_HIBERNATE_DDL_AUTO: update
       JWT_SECRET_KEY: dGhpcy1pcy1hLXNhbXBsZS1zZWNyZXQta2V5LWZvci1qd3Qtc2hhMjU2LWFsaWduZWQtc2VjdXJpdHktcHJpdmFjeQ==
       AWS_S3_BUCKET: bizflow-integration-bucket
-      AWS_ACCESS_KEY: temp
-      AWS_SECRET_KEY: temp
+      AWS_ACCESS_KEY: aws_access_key_placeholder
+      AWS_SECRET_KEY: aws_secret_key_placeholder
+      AWS_S3_LOCAL_ONLY: true
+      APP_SEED_DEMO_SCENARIOS: false
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
     restart: always
 
 volumes:

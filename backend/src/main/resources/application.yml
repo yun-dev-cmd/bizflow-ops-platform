@@ -36,6 +36,10 @@ aws:
     access-key: aws_access_key_placeholder
     secret-key: aws_secret_key_placeholder
 
+app:
+  seed:
+    demo-scenarios: true
+
 # Swagger OpenAPI 설정
 springdoc:
   swagger-ui:
@@ -62,7 +66,7 @@ spring:
     driver-class-name: org.postgresql.Driver
   jpa:
     hibernate:
-      ddl-auto: none
+      ddl-auto: ${SPRING_JPA_HIBERNATE_DDL_AUTO:none}
     show-sql: false
   batch:
     jdbc:
@@ -80,3 +84,8 @@ aws:
     region: ${AWS_REGION:ap-northeast-2}
     access-key: ${AWS_ACCESS_KEY}
     secret-key: ${AWS_SECRET_KEY}
+    local-only: ${AWS_S3_LOCAL_ONLY:false}
+
+app:
+  seed:
+    demo-scenarios: ${APP_SEED_DEMO_SCENARIOS:false}

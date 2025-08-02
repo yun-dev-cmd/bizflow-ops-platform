@@ -35,6 +35,9 @@ public class FileServiceImpl implements FileService {
     @Value("${aws.s3.bucket}")
     private String bucketName;
 
+    @Value("${aws.s3.local-only:false}")
+    private boolean localOnly;
+
     // 로컬 백업용 디렉토리 (S3 에러 발생 시 Fallback 저장소) - 상대경로로 변경하여 이식성 증대
     private final String localUploadDir = "./uploads";
 
@@ -46,6 +49,11 @@ public class FileServiceImpl implements FileService {
         long fileSize = file.getSize();
         String storedPath;
         String storageType = "S3_MOCK";
+
+        if (localOnly) {
+            storedPath = saveToLocal(file, storedFileName);
+            return saveAttachmentMetadata(settlementRequestId, originalFileName, storedPath, "LOCAL", username);
+        }
 
         try {
             // 1. AWS S3 업로드 시도 (Mock S3 환경이거나 환경변수 비정상 시 exception 발생)
@@ -63,19 +71,35 @@ public class FileServiceImpl implements FileService {
             log.warn("AWS S3 upload failed. Fallback to Local Storage. Reason: {}", e.getMessage());
             
             // 2. Fallback: 로컬 디스크 저장
-            File directory = new File(localUploadDir);
-            if (!directory.exists()) {
-                directory.mkdirs();
-            }
-            Path targetPath = Paths.get(localUploadDir).resolve(storedFileName);
-            Files.copy(file.getInputStream(), targetPath);
-            
-            storedPath = targetPath.toAbsolutePath().toString();
+            storedPath = saveToLocal(file, storedFileName);
             storageType = "LOCAL";
             log.info("Successfully saved file to Local: path={}", storedPath);
         }
 
         // 3. DB 메타데이터 저장
+        Attachment attachment = Attachment.builder()
+                .settlementRequestId(settlementRequestId)
+                .originalFileName(originalFileName)
+                .storedPath(storedPath)
+                .storageType(storageType)
+                .uploadedBy(username)
+                .createdAt(LocalDateTime.now())
+                .build();
+
+        return attachmentRepository.save(attachment);
+    }
+
+    private String saveToLocal(MultipartFile file, String storedFileName) throws IOException {
+        File directory = new File(localUploadDir);
+        if (!directory.exists()) {
+            directory.mkdirs();
+        }
+        Path targetPath = Paths.get(localUploadDir).resolve(storedFileName);
+        Files.copy(file.getInputStream(), targetPath);
+        return targetPath.toAbsolutePath().toString();
+    }
+
+    private Attachment saveAttachmentMetadata(Long settlementRequestId, String originalFileName, String storedPath, String storageType, String username) {
         Attachment attachment = Attachment.builder()
                 .settlementRequestId(settlementRequestId)
                 .originalFileName(originalFileName)

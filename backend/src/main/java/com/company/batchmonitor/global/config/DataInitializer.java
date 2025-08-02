@@ -11,6 +11,7 @@ import com.company.batchmonitor.repository.SettlementRequestRepository;
 import com.company.batchmonitor.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Component;
@@ -27,6 +28,9 @@ public class DataInitializer implements CommandLineRunner {
     private final SettlementRequestRepository settlementRequestRepository;
     private final ExternalResultRepository externalResultRepository;
     private final PasswordEncoder passwordEncoder;
+
+    @Value("${app.seed.demo-scenarios:true}")
+    private boolean seedDemoScenarios;
 
     @Override
     public void run(String... args) {
@@ -67,6 +71,11 @@ public class DataInitializer implements CommandLineRunner {
             log.info("Created default user account");
             return user;
         });
+
+        if (!seedDemoScenarios) {
+            log.info("Demo scenario data seeding is disabled");
+            return;
+        }
 
         if (batchJobLogRepository.count() == 0) {
             BatchJobLog jobLog = BatchJobLog.builder()
